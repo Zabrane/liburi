@@ -143,7 +143,7 @@ from_string(Uri0) when is_binary(Uri0) ->
     {Path, Uri3} = liburi_parser:parse_path(Uri2),
     {Query, Uri4} = liburi_parser:parse_query(Uri3),
     Frag = liburi_parser:parse_frag(Uri4),
-    new(Scheme, UserInfo, Host, Port, Path, Query, Frag);
+    new(Scheme, UserInfo, Host, scheme2port(Scheme, Port), Path, Query, Frag);
 from_string(Uri) when is_list(Uri) ->
     from_string(iolist_to_binary(Uri)).
 
@@ -230,7 +230,7 @@ query_foldl(F, Init, Query) when is_list(Query) ->
 %% @doc Convert a dictionary or proplist to an iolist representing the query part of a uri. Keys and values can
 %% be binaries, lists, atoms, integers or floats, and will be automatically converted to a string and quoted.
 
--spec to_query(proplist:proplist()) ->
+-spec to_query(proplists:proplist()) ->
     binary().
 
 to_query(List) when is_list(List) ->
@@ -240,7 +240,7 @@ to_query(List) when is_list(List) ->
 %% which should take three arguments: a function, an initial accumulator value, and  the data structure to fold over.
 %% @see to_query/1
 
--spec to_query(function(), binary() | proplist:proplist()) ->
+-spec to_query(function(), binary() | proplists:proplist()) ->
     binary().
 
 to_query(FoldF, Ds) ->
@@ -352,13 +352,13 @@ host(Uri, NewHost) ->
 
 %% @doc Return the port field of {@link uri()}.
 
--spec port(uri()) -> integer().
+-spec port(uri()) -> non_neg_integer() | undefined.
 port(#uri{port = Port}) ->
     Port.
 
 %% @doc Set the port field of {@link uri()}.
 
--spec port(uri(), integer()) -> uri().
+-spec port(uri(), non_neg_integer() | undefined) -> uri().
 port(Uri, NewPort) ->
     update_raw(Uri#uri{port = NewPort}).
 
@@ -374,11 +374,22 @@ path(#uri{path = Path}) ->
 path(Uri, NewPath) ->
     update_raw(Uri#uri{path = NewPath}).
 
-%% @doc Append a path to the existing path of the system
+%% @doc Append a path to the existing path of the system.
+%% Handles trailing/leading slashes to avoid double-slash in the result.
 
 -spec append_path(uri(), binary()) -> uri().
 append_path(Uri=#uri{path=Path}, NewPath) ->
-    path(Uri, <<Path/binary, <<"/">>/binary, NewPath/binary>>).
+    Joined = case {Path, NewPath} of
+        {<<>>, _} ->
+            NewPath;
+        {_, <<>>} ->
+            Path;
+        _ ->
+            PathTrimmed = binary:part(Path, 0, max(0, byte_size(Path) - trailing_slashes(Path))),
+            NewPathTrimmed = case NewPath of <<$/, Rest/binary>> -> Rest;_ -> NewPath end,
+            <<PathTrimmed/binary, $/, NewPathTrimmed/binary>>
+    end,
+    path(Uri, Joined).
 
 %% @doc Return the raw_query field of {@link uri()}.
 
@@ -449,12 +460,13 @@ port_to_bin(Port) ->
     end.
 
 path_to_bin(<<>>) ->
-    $/;
+    <<"/">>;
 path_to_bin(Path) ->
-    case liburi_utils:quote(Path, path) of
+    QuotedPath = liburi_utils:quote(Path, path),
+    case QuotedPath of
         <<$/, _/binary>> ->
-            Path;
-        QuotedPath ->
+            QuotedPath;
+        _ ->
             <<$/, QuotedPath/binary>>
     end.
 
@@ -467,3 +479,28 @@ frag_to_bin(<<>>) ->
     <<>>;
 frag_to_bin(Frag) ->
     <<$#, (liburi_utils:quote(Frag, frag))/binary>>.
+
+trailing_slashes(Bin) ->
+    trailing_slashes(Bin, byte_size(Bin), 0).
+
+trailing_slashes(_Bin, 0, Count) ->
+    Count;
+trailing_slashes(Bin, Pos, Count) ->
+    case binary:at(Bin, Pos - 1) of
+        $/ ->
+        	trailing_slashes(Bin, Pos - 1, Count + 1);
+        _ ->
+        	Count
+    end.
+
+scheme2port(Scheme, undefined) ->
+   case Scheme of
+       <<"https">> ->
+           443;
+       <<"http">> ->
+           80;
+       _ ->
+           undefined
+   end;
+scheme2port(_Scheme, Port) ->
+    Port.

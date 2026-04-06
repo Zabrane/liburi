@@ -11,6 +11,31 @@ append_path_test() ->
     T1 = liburi:append_path(T0, <<"additional/path">>),
     ?assertMatch(<<"http://myhost.com:8080/my/path/additional/path?color=red#Section%205">>, liburi:to_string(T1)).
 
+append_path_trailing_slash_test() ->
+    T0 = liburi:new(<<"http">>, <<"">>, <<"myhost.com">>, 8080, <<"/my/path/">>, <<>>, <<>>),
+    T1 = liburi:append_path(T0, <<"extra">>),
+    ?assertMatch(<<"/my/path/extra">>, liburi:path(T1)).
+
+append_path_leading_slash_test() ->
+    T0 = liburi:new(<<"http">>, <<"">>, <<"myhost.com">>, 80, <<"/base">>, <<>>, <<>>),
+    T1 = liburi:append_path(T0, <<"/child">>),
+    ?assertMatch(<<"/base/child">>, liburi:path(T1)).
+
+append_path_both_slashes_test() ->
+    T0 = liburi:new(<<"http">>, <<"">>, <<"myhost.com">>, 80, <<"/base/">>, <<>>, <<>>),
+    T1 = liburi:append_path(T0, <<"/child">>),
+    ?assertMatch(<<"/base/child">>, liburi:path(T1)).
+
+append_path_empty_new_test() ->
+    T0 = liburi:new(<<"http">>, <<"">>, <<"myhost.com">>, 80, <<"/existing">>, <<>>, <<>>),
+    T1 = liburi:append_path(T0, <<>>),
+    ?assertMatch(<<"/existing">>, liburi:path(T1)).
+
+append_path_empty_existing_test() ->
+    T0 = liburi:new(<<"http">>, <<"">>, <<"myhost.com">>, 80, <<>>, <<>>, <<>>),
+    T1 = liburi:append_path(T0, <<"new/stuff">>),
+    ?assertMatch(<<"new/stuff">>, liburi:path(T1)).
+
 parse_scheme_test() ->
     ?assertMatch({<<"http">>, <<"//test.com/">>}, liburi_parser:parse_scheme(<<"http://test.com/">>)),
     ?assertMatch({<<>>, <<"/test">>}, liburi_parser:parse_scheme(<<"/test">>)),
@@ -60,6 +85,7 @@ proplist_query_test() ->
 no_path_test() ->
     Uri0 = liburi:from_string(<<"https://something.free.domain.com?a=1&b=2">>),
     ?assertMatch(<<"https">>, liburi:scheme(Uri0)),
+    ?assertMatch(443, liburi:port(Uri0)),
     ?assertMatch(<<"something.free.domain.com">>, liburi:host(Uri0)),
     ?assertMatch(<<"/">>, liburi:path(Uri0)),
     ?assertMatch( [{<<"a">>,<<"1">>},{<<"b">>,<<"2">>}], liburi:q(Uri0)).
@@ -75,3 +101,100 @@ quote_test() ->
 
 escape_test() ->
     ?assertMatch(<<"%20">>, liburi_utils:escape($\s)).
+
+port_undefined_test() ->
+    Uri = liburi:new(<<"http">>, <<"">>, <<"example.com">>, undefined, <<"/">>, <<>>, <<>>),
+    ?assertEqual(undefined, liburi:port(Uri)).
+
+port_set_test() ->
+    Uri = liburi:new(<<"http">>, <<"">>, <<"example.com">>, 3000, <<"/">>, <<>>, <<>>),
+    ?assertEqual(3000, liburi:port(Uri)).
+
+port_set_undefined_test() ->
+    Uri0 = liburi:new(<<"http">>, <<"">>, <<"example.com">>, 8080, <<"/">>, <<>>, <<>>),
+    Uri1 = liburi:port(Uri0, undefined),
+    ?assertEqual(undefined, liburi:port(Uri1)),
+    Raw = liburi:to_string(Uri1),
+    ?assertMatch(nomatch, binary:match(Raw, <<":8080">>)).
+
+path_with_spaces_test() ->
+    Uri = liburi:new(<<"http">>, <<"">>, <<"example.com">>, undefined, <<"/hello world">>, <<>>, <<>>),
+    Raw = liburi:to_string(Uri),
+    %% The raw string must not contain a literal space in the path
+    ?assertMatch(nomatch, binary:match(Raw, <<" ">>)),
+    %% But the path accessor returns the unquoted form
+    ?assertMatch(<<"/hello world">>, liburi:path(Uri)).
+
+path_quoted_roundtrip_test() ->
+    Uri0 = liburi:new(<<"http">>, <<"">>, <<"example.com">>, undefined, <<"/">>, <<>>, <<>>),
+    Uri1 = liburi:path(Uri0, <<"/foo bar/baz">>),
+    Raw = liburi:to_string(Uri1),
+    ?assertMatch(nomatch, binary:match(Raw, <<" ">>)),
+    ?assertMatch(<<"/foo bar/baz">>, liburi:path(Uri1)).
+
+empty_path_produces_slash_in_raw_test() ->
+    Uri = liburi:new(<<"http">>, <<"">>, <<"example.com">>, undefined, <<>>, <<>>, <<>>),
+    Raw = liburi:to_string(Uri),
+    %% Raw should contain "example.com/" (host followed by slash)
+    ?assertMatch({_, _}, binary:match(Raw, <<"example.com/">>)).
+
+from_http_1_1_no_user_info_test() ->
+    Uri = liburi:from_http_1_1(<<"https">>, <<"example.com:443">>, <<"/path?q=1">>),
+    ?assertEqual(<<"">>, liburi:user_info(Uri)),
+    ?assertEqual(<<"example.com">>, liburi:host(Uri)),
+    ?assertEqual(443, liburi:port(Uri)),
+    ?assertEqual(<<"/path">>, liburi:path(Uri)),
+    ?assertEqual([{<<"q">>, <<"1">>}], liburi:q(Uri)).
+
+to_query_empty_test() ->
+    ?assertEqual(<<>>, liburi:to_query([])).
+
+to_query_single_pair_test() ->
+    ?assertEqual(<<"key=val">>, liburi:to_query([{<<"key">>, <<"val">>}])).
+
+to_query_multiple_pairs_test() ->
+    Result = liburi:to_query([{<<"a">>, <<"1">>}, {<<"b">>, <<"2">>}]),
+    ?assertEqual(<<"a=1&b=2">>, Result).
+
+scheme_setter_test() ->
+    Uri0 = liburi:from_string(<<"http://example.com/path">>),
+    Uri1 = liburi:scheme(Uri0, <<"https">>),
+    ?assertEqual(<<"https">>, liburi:scheme(Uri1)),
+    Raw = liburi:to_string(Uri1),
+    ?assertMatch({0, _}, binary:match(Raw, <<"https://">>)).
+
+host_setter_test() ->
+    Uri0 = liburi:from_string(<<"http://old.com/path">>),
+    Uri1 = liburi:host(Uri0, <<"new.com">>),
+    ?assertEqual(<<"new.com">>, liburi:host(Uri1)),
+    Raw = liburi:to_string(Uri1),
+    ?assertMatch({_, _}, binary:match(Raw, <<"new.com">>)).
+
+frag_setter_test() ->
+    Uri0 = liburi:from_string(<<"http://example.com/path">>),
+    Uri1 = liburi:frag(Uri0, <<"top">>),
+    ?assertEqual(<<"top">>, liburi:frag(Uri1)),
+    Raw = liburi:to_string(Uri1),
+    ?assertMatch({_, _}, binary:match(Raw, <<"#top">>)).
+
+frag_with_spaces_test() ->
+    Uri0 = liburi:from_string(<<"http://example.com/path">>),
+    Uri1 = liburi:frag(Uri0, <<"my section">>),
+    ?assertEqual(<<"my section">>, liburi:frag(Uri1)),
+    Raw = liburi:to_string(Uri1),
+    %% Fragment should be percent-encoded in raw
+    ?assertMatch(nomatch, binary:match(Raw, <<"#my section">>)),
+    ?assertMatch({_, _}, binary:match(Raw, <<"#my%20section">>)).
+
+user_info_setter_test() ->
+    Uri0 = liburi:from_string(<<"http://example.com/path">>),
+    Uri1 = liburi:user_info(Uri0, <<"alice">>),
+    ?assertEqual(<<"alice">>, liburi:user_info(Uri1)),
+    Raw = liburi:to_string(Uri1),
+    ?assertMatch({_, _}, binary:match(Raw, <<"alice@example.com">>)).
+
+raw_query_setter_test() ->
+    Uri0 = liburi:from_string(<<"http://example.com/path">>),
+    Uri1 = liburi:raw_query(Uri0, <<"x=1&y=2">>),
+    ?assertEqual([{<<"x">>, <<"1">>}, {<<"y">>, <<"2">>}], liburi:q(Uri1)),
+    ?assertEqual(<<"x=1&y=2">>, liburi:raw_query(Uri1)).

@@ -27,7 +27,6 @@ liburi:host(Uri).
 - support uri creation
 - support [ipv6 addresses in names][1]
 
-
 ## Tests
 
 In order to run the integrity tests run `rebar3 eunit` from project root.

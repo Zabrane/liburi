@@ -14,7 +14,7 @@ unquote(Str) ->
     unquote(Str, <<>>).
 
 escape(C) ->
-    erlang:iolist_to_binary(io_lib:format("%~2.16.0B", [C])).
+    iolist_to_binary(io_lib:format("%~2.16.0B", [C])).
 
 to_binary(V) when is_binary(V) ->
     V;

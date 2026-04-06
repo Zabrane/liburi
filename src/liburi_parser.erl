@@ -49,7 +49,7 @@ parse_host_port(HostPort) ->
         [Host, <<>>] ->
             {Host, undefined};
         [Host, Port] ->
-            {Host, list_to_integer(binary_to_list(Port))};
+            {Host, binary_to_integer(Port)};
         _ ->
             throw({uri_error, {invalid_host_port, HostPort}})
     end.
